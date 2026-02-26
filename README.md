@@ -25,15 +25,19 @@ A fully functional, fast, and secure Telegram shop bot built with Python and Aio
 Create a config.py file in the main directory and add your credentials:
 
 Python
+```
 API_TOKEN = "YOUR_BOT_TOKEN_HERE"
 ADMIN_ID = 123456789
+```
 Install required libraries:
 
-Bash
+```
 pip install aiogram
+```
 Run the bot:
 
-Bash
+```
 python main.py
+```
 👨‍💻 Developer
 Developed by Nodir JON To'ychiyev - Freelance Python Developer.
