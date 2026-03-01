@@ -27,7 +27,8 @@ def create_db():
             name TEXT NOT NULL,
             price INTEGER NOT NULL,
             photo TEXT,
-            category TEXT DEFAULT 'Boshqa'
+            category TEXT DEFAULT 'Boshqa',
+            quantity INTEGER DEFAULT 0 
         )
     ''')
 
@@ -53,21 +54,28 @@ def get_categories():
     conn.close()
     return categories
 
+
 def get_products_by_category(category_name):
     """Tanlangan kategoriya bo'yicha mahsulotlarni olish"""
     conn = connect_db()
+    # MANA SHU QATOR QO'SHILDI: Baza endi ma'lumotlarni nomlari bilan beradi
+    conn.row_factory = sqlite3.Row
+
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM products WHERE category = ?", (category_name,))
-    products = cursor.fetchall()
+
+    # Qaytayotgan ma'lumotlarni to'liq lug'atga (dict) o'giramiz
+    products = [dict(row) for row in cursor.fetchall()]
+
     conn.close()
     return products
 
 # --- ADMIN UCHUN FUNKSIYALAR ---
-def add_product(name, price, photo, category):
+def add_product(name, price, photo, category, quantity):
     conn = connect_db()
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO products (name, price, photo, category) VALUES (?, ?, ?, ?)',
-                   (name, price, photo, category))
+    cursor.execute('INSERT INTO products (name, price, photo, category, quantity) VALUES (?, ?, ?, ?, ?)',
+                   (name, price, photo, category, quantity))
     conn.commit()
     conn.close()
 
@@ -182,3 +190,68 @@ def get_all_users():
     users = cursor.fetchall()
     conn.close()
     return [user['telegram_id'] for user in users]
+
+
+# Ombordan sotib olingan mahsulot sonini ayirib tashlash
+def reduce_product_quantity(product_id, amount):
+    conn = sqlite3.connect('shop.db')
+    cursor = conn.cursor()
+
+    # Bazadagi quantity ni olingan amount ga kamaytiramiz
+    cursor.execute('''
+        UPDATE products 
+        SET quantity = quantity - ? 
+        WHERE id = ?
+    ''', (amount, product_id))
+
+    conn.commit()
+    conn.close()
+
+
+# Mijozning savatidagi narsalarni ombordan ayirish uchun tortib olish
+def get_cart_items(user_id):
+    conn = sqlite3.connect('shop.db')
+    conn.row_factory = sqlite3.Row  # Ustun nomlari bilan ishlash uchun
+    cursor = conn.cursor()
+
+    # "cart" degan joyga o'zingizning savat jadvallingiz nomini yozing
+    # (masalan cart, yoki basket, yoki user_cart)
+    cursor.execute('''
+        SELECT product_id, quantity 
+        FROM cart 
+        WHERE user_id = ?
+    ''', (user_id,))
+
+    items = cursor.fetchall()
+    conn.close()
+    return items
+
+
+# Mahsulotning ombordagi qoldig'ini (zaxirasini) bilish
+def get_product_quantity(product_id):
+    conn = sqlite3.connect('shop.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT quantity FROM products WHERE id = ?", (product_id,))
+    result = cursor.fetchone()
+    conn.close()
+
+    # Agar mahsulot topilsa zaxirasini, topilmasa 0 qaytaradi
+    return result[0] if result else 0
+
+# Admin barcha mahsulotlarni ko'rishi uchun
+def get_all_products_admin():
+    conn = sqlite3.connect('shop.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, quantity FROM products")
+    products = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return products
+
+# Tanlangan mahsulotning ombordagi sonini yangilash
+def update_product_quantity(product_id, new_quantity):
+    conn = sqlite3.connect('shop.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE products SET quantity = ? WHERE id = ?", (new_quantity, product_id))
+    conn.commit()
+    conn.close()

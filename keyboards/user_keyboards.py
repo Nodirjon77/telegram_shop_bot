@@ -33,7 +33,7 @@ def get_cart_keyboard(cart_items):
                 callback_data=CartCallback(action="minus", product_id=pid).pack()
             ),
             InlineKeyboardButton(
-                text=f"{qty} ta",
+                text=f"{qty} pcs",
                 callback_data="ignore"  # Bu tugma shunchaki ma'lumot uchun
             ),
             InlineKeyboardButton(
@@ -43,26 +43,42 @@ def get_cart_keyboard(cart_items):
         )
 
     # Pastki umumiy tugmalar
-    builder.row(InlineKeyboardButton(text="✅ Buyurtma berish", callback_data="order"))
-    builder.row(InlineKeyboardButton(text="🗑 Savatni tozalash", callback_data="clear_cart"))
+    builder.row(InlineKeyboardButton(text="🛍 Checkout", callback_data="order"))
+    builder.row(InlineKeyboardButton(text="🗑 Clear Cart", callback_data="clear_cart"))
 
     return builder.as_markup()
 
 
 # 3. Menyu uchun tugmalar (har bir mahsulot ostida)
-def get_product_keyboard(product_id, count=0):
-    builder = InlineKeyboardBuilder()
-    if count > 0:
-        builder.add(InlineKeyboardButton(text=f"✅ Savatda ({count} ta)", callback_data=f"add_{product_id}"))
-    else:
-        builder.add(InlineKeyboardButton(text="🛒 Savatga qo'shish", callback_data=f"add_{product_id}"))
-    return builder.as_markup()
+def get_product_keyboard(product_id, count=0, stock=0):
 
+    builder = InlineKeyboardBuilder()
+
+    # Toza raqamga o'giramiz (agar bu yerda xatolik bo'lsa, terminalda qizil yozuv chiqadi va aybdorni topamiz)
+    count = int(count) if count else 0
+    stock = int(stock) if stock else 0
+
+    # 1-holat: Omborda umuman qolmagan
+    if stock <= 0:
+        builder.add(InlineKeyboardButton(text="🚫 Out of Stock", callback_data="ignore"))
+
+    # 2-holat: Mijoz ombordagi barcha bor zaxirani savatga qo'shib bo'lgan (limit)
+    elif count >= stock:
+        builder.add(InlineKeyboardButton(text=f"✅ In Cart (Max {count})", callback_data="ignore"))
+
+    # 3-holat: Hali omborda joy bor, bemalol qo'shishi mumkin
+    else:
+        if count > 0:
+            builder.add(InlineKeyboardButton(text=f"✅ In Cart ({count}) ➕", callback_data=f"add_{product_id}"))
+        else:
+            builder.add(InlineKeyboardButton(text="🛒 Add to Cart", callback_data=f"add_{product_id}"))
+
+    return builder.as_markup()
 
 # 4. Kontakt yuborish tugmasi
 def get_contact_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📞 Raqamni yuborish", request_contact=True)]],
+        keyboard=[[KeyboardButton(text="📱 Share Contact", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True
     )
@@ -71,16 +87,16 @@ def get_contact_keyboard():
 # 5. To'lov turi tugmalari
 def get_payment_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💵 Naqd", callback_data="pay_cash"))
-    builder.row(InlineKeyboardButton(text="💳 Click / Payme", callback_data="pay_card"))
+    builder.row(InlineKeyboardButton(text="💵 Cash on Delivery", callback_data="pay_cash"))
+    builder.row(InlineKeyboardButton(text="💳 Online Payment", callback_data="pay_card"))
     return builder.as_markup()
 
 # 6. Asosiy menyu tugmalari
 def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🍔 Menyu")],
-            [KeyboardButton(text="🗑 Savat"), KeyboardButton(text="👤 Profil")] # Profil ixtiyoriy
+            [KeyboardButton(text="🍔 Menu")],
+            [KeyboardButton(text="🛒 Cart"), KeyboardButton(text="👤 My Account")] # Profil ixtiyoriy
         ],
         resize_keyboard=True
     )

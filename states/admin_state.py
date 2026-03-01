@@ -9,3 +9,6 @@ class AdminState(StatesGroup):
     waiting_for_price = State()
     waiting_for_photo = State()
     waiting_for_broadcast_message = State()
+    waiting_for_quantity = State()
+    waiting_for_edit_quantity = State()
+    quantity = State()

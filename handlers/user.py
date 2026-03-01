@@ -29,21 +29,23 @@ from database.database import (
     update_cart_quantity,  # Yangi
     delete_cart_item,
     get_categories,
-    get_products_by_category
+    get_products_by_category,
+    reduce_product_quantity,
+    get_product_quantity
 )
 
 user_router = Router()
 
 
-@user_router.message(F.text == "🍔 Menyu")
+@user_router.message(F.text == "🍔 Menu")
 async def show_categories(message: types.Message):
     categories = get_categories()
 
     if not categories:
-        await message.answer("Hozircha bo'limlar mavjud emas 😔")
+        await message.answer("No categories available at the moment 😔")
         return
 
-    await message.answer("Iltimos, bo'limni tanlang: 👇",
+    await message.answer("Please select a category: 👇",
                          reply_markup=get_categories_keyboard(categories))
 
 
@@ -57,16 +59,32 @@ async def show_products_by_category(callback: types.CallbackQuery):
     # Eskisidan qolgan xabarni o'chirish (ixtiyoriy)
     await callback.message.delete()
 
-    await callback.message.answer(f"📦 <b>{category_name}</b> bo'limidagi mahsulotlar:",
+    await callback.message.answer(f"📦 Products in <b>{category_name}</b>",
                                   parse_mode="HTML"
                                 )
 
     for product in products:
         user_id = callback.from_user.id
-        count = get_product_count(user_id, product['id'])
-        keyboard = get_product_keyboard(product['id'], count)
 
-        caption = f"<b>{product['name']}</b>\n\n💰 Narxi: {product['price']} so'm"
+        # 1. Savatdagi sonini olamiz (agar xato bo'lsa yoki bo'sh bo'lsa, majburan 0 qilamiz)
+        count = get_product_count(user_id, product['id'])
+        if count is None:
+            count = 0
+
+        # 2. Ombordagi zaxirani olamiz
+        stock = product['quantity']
+
+        # 4. Klaviaturani aynan nomma-nom chaqiramiz (o'rni almashmasligi uchun)
+        keyboard = get_product_keyboard(product_id=product['id'], count=count, stock=stock)
+
+        # 5. Yozuvni tayyorlaymiz
+        if stock > 0:
+            stock_info = f"📦 In Stock: {stock} pcs"
+        else:
+            stock_info = "🔴 Out of Stock!"
+
+        caption = f"<b>{product['name']}</b>\n\n💰 Price: {product['price']} UZS\n{stock_info}"
+
         await callback.message.answer_photo(
             photo=product['photo'],
             caption=caption,
@@ -74,6 +92,7 @@ async def show_products_by_category(callback: types.CallbackQuery):
             parse_mode="HTML"
         )
     await callback.answer()
+
 
 # --- 2. SAVATGA QO'SHISH (MENU ICHIDAN) ---
 @user_router.callback_query(F.data.startswith("add_"))
@@ -83,34 +102,43 @@ async def add_product_to_cart(callback: types.CallbackQuery):
 
     add_to_cart(user_id, product_id)
     count = get_product_count(user_id, product_id)
-    new_keyboard = get_product_keyboard(product_id, count)
+
+    # 1. YANGI: Omborda nechta qolganini aniqlaymiz
+    stock = get_product_quantity(product_id)
+
+    # 2. YANGI: Endi klaviaturaga zaxirani (stock ni) ham aniq qilib beramiz
+    new_keyboard = get_product_keyboard(product_id=product_id, count=count, stock=stock)
 
     with suppress(TelegramBadRequest):
         await callback.message.edit_reply_markup(reply_markup=new_keyboard)
 
-    await callback.answer(f"Savatga qo'shildi!")
+    await callback.answer(f"Added to Cart! ✅")
+
+@user_router.callback_query(F.data == "ignore")
+async def ignore_callback(callback: types.CallbackQuery):
+    await callback.answer("This product is currently out of stock or you have reached the maximum limit!", show_alert=True)
 
 
 # --- 3. SAVATNI KO'RISH ---
-@user_router.message(F.text == "🗑 Savat")
+@user_router.message(F.text == "🛒 Cart")
 async def show_cart(message: types.Message):
     user_id = message.from_user.id
     cart_items = get_cart_products(user_id)
 
     if not cart_items:
-        await message.answer("Savatingiz hozircha bo'sh 🗑")
+        await message.answer("Your cart is currently empty 🗑")
         return
 
-    text = "🛒 <b>Sizning savatingiz:</b>\n\n"
+    text = "🛒 <b>/Your Cart:<b>\n\n"
     total_price = 0
 
     for item in cart_items:
         # Bazadan 'quantity' va 'price' kelishi kerak
         line_total = item['price'] * item['quantity']
         total_price += line_total
-        text += f"▪️ {item['name']} | {item['quantity']} ta | {line_total} so'm\n"
+        text += f"▪️ {item['name']} | {item['quantity']} pcs | {line_total} UZS\n"
 
-    text += f"\n💰 <b>Jami: {total_price} so'm</b>"
+    text += f"\n💰 <b>Total: {total_price} UZS</b>"
 
     await message.answer(
         text=text,
@@ -138,19 +166,19 @@ async def handle_cart_actions(callback: types.CallbackQuery, callback_data: Cart
     cart_items = get_cart_products(user_id)
 
     if not cart_items:
-        await callback.message.edit_text("Savatingiz bo'shab qoldi 🗑")
+        await callback.message.edit_text("Cart cleared! 🗑")
         await callback.answer()
         return
 
     # Matnni qayta shakllantirish
-    text = "🛒 <b>Sizning savatingiz:</b>\n\n"
+    text = "🛒 <b>Your Cart:</b>\n\n"
     total_price = 0
     for item in cart_items:
         line_total = item['price'] * item['quantity']
         total_price += line_total
-        text += f"▪️ {item['name']} | {item['quantity']} ta | {line_total} so'm\n"
+        text += f"▪️ {item['name']} | {item['quantity']} pcs | {line_total} UZS\n"
 
-    text += f"\n💰 <b>Jami: {total_price} so'm</b>"
+    text += f"\n💰 <b>Total: {total_price} UZS</b>"
 
     # Faqat o'zgargan qismini tahrirlash (ekran miltillab ketmasligi uchun)
     with suppress(TelegramBadRequest):
@@ -167,8 +195,8 @@ async def handle_cart_actions(callback: types.CallbackQuery, callback_data: Cart
 async def process_clear_cart(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     clear_cart(user_id)
-    await callback.message.edit_text("Savatingiz tozalandi! 🗑")
-    await callback.answer("Savat bo'shatildi")
+    await callback.message.edit_text("Cart cleared! 🗑")
+    await callback.answer("Cart cleared! 🗑")
 
 
 # --- 6. BUYURTMA BERISH JARAYONI ---
@@ -178,13 +206,13 @@ async def ask_phone_number(callback: types.CallbackQuery, state: FSMContext):
     cart_items = get_cart_products(user_id)
 
     if not cart_items:
-        await callback.answer("Savatingiz bo'sh!", show_alert=True)
+        await callback.answer("Your cart is empty!", show_alert=True)
         return
 
     await state.set_state(OrderState.waiting_for_phone)
     await callback.message.answer(
-        "Buyurtmani rasmiylashtirish uchun telefon raqamingizni yuboring 📞\n"
-        "Pastdagi tugmani bosing 👇",
+        "Please share your phone number to proceed with the checkout 📞\n"
+        "Click the button below 👇",
         reply_markup=get_contact_keyboard()
     )
     with suppress(TelegramBadRequest):
@@ -203,7 +231,7 @@ async def ask_payment_type(message: types.Message, state: FSMContext):
 
     # 4. To'lov turini so'raymiz va Reply Keyboard'ni o'chirib yuboramiz
     await message.answer(
-        "Rahmat! Endi to'lov turini tanlang: 👇",
+        "Thank you! Now please select a payment method: 👇",
         reply_markup=get_payment_keyboard()
     )
 
@@ -211,7 +239,7 @@ async def ask_payment_type(message: types.Message, state: FSMContext):
     # yuqoridagi xabarga ReplyKeyboardRemove qo'shish mumkin.
     # Lekin InlineKeyboardMarkup bilan ReplyKeyboardRemove birga ishlamasligi mumkin.
     # Shuning uchun bitta bo'sh xabar bilan tugmani yashiramiz:
-    await message.answer("To'lov usulini tanlash uchun pastdagi tugmalardan foydalaning.",
+    await message.answer("Use the buttons below to select your payment method.",
                          reply_markup=ReplyKeyboardRemove())
 
 # --- 7. TO'LOV TURINI QABUL QILISH ---
@@ -225,27 +253,28 @@ async def process_pay_cash(callback: types.CallbackQuery, state: FSMContext):
 
     cart_items = get_cart_products(user_id)
 
-    # Adminga hisobot tayyorlash
-    order_text = f"🆕 <b>YANGI BUYURTMA (NAQD)!</b>\n\n"
-    order_text += f"👤 Mijoz: {callback.from_user.full_name}\n"
-    order_text += f"📞 Tel: {phone}\n"
+    # Adminga hisobot tayyorlash (Ingliz tilida)
+    order_text = f"🆕 <b>NEW ORDER (CASH)!</b>\n\n"
+    order_text += f"👤 Customer: {callback.from_user.full_name}\n"
+    order_text += f"📞 Phone: {phone}\n"
     order_text += f"------------------------\n"
 
     total = 0
     for item in cart_items:
         summa = item['price'] * item['quantity']
         total += summa
-        order_text += f"▪️ {item['name']} x {item['quantity']} = {summa} so'm\n"
+        order_text += f"▪️ {item['name']} x {item['quantity']} = {summa} UZS\n"
+        reduce_product_quantity(item['id'], item['quantity'])
 
     order_text += f"------------------------\n"
-    order_text += f"💰 Jami: {total} so'm"
+    order_text += f"💰 Total: {total} UZS"
 
     # Adminga yuborish
     await callback.bot.send_message(ADMIN_ID, order_text, parse_mode="HTML")
 
     # Mijozga javob
-    await callback.message.edit_text("✅ Buyurtmangiz qabul qilindi (Naqd to'lov). Rahmat!")
-    await callback.message.answer("Asosiy menyu:", reply_markup=get_main_menu())
+    await callback.message.edit_text("✅ Your order has been received (Cash Payment). Thank you!")
+    await callback.message.answer("Main Menu:", reply_markup=get_main_menu())
 
     clear_cart(user_id)
     await state.clear()
@@ -259,13 +288,12 @@ async def process_pay_card(callback: types.CallbackQuery):
 
     prices = []
     for item in cart_items:
-        # Telegram Payments summani tiyinlarda qabul qiladi (masalan: 1000 so'm = 100000 tiyin)
         prices.append(LabeledPrice(label=item['name'], amount=int(item['price'] * item['quantity'] * 100)))
 
     await callback.message.answer_invoice(
-        title="Buyurtma uchun to'lov",
-        description="Tanlangan mahsulotlar uchun online to'lov",
-        payload="order_payload_123",  # Ichki ID
+        title="Order Payment",
+        description="Online payment for selected products",
+        payload="order_payload_123",
         provider_token=PAYMENT_TOKEN,
         currency="UZS",
         prices=prices,
@@ -276,7 +304,6 @@ async def process_pay_card(callback: types.CallbackQuery):
 
 # --- 8. TELEGRAM PAYMENTS MAHSUS HANDLERLARI ---
 
-# To'lov tugmasi bosilganda (Pre-Checkout)
 @user_router.pre_checkout_query()
 async def checkout_process(pre_checkout_q: types.PreCheckoutQuery):
     await pre_checkout_q.answer(ok=True)
@@ -286,22 +313,22 @@ async def checkout_process(pre_checkout_q: types.PreCheckoutQuery):
 async def on_successful_payment(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = await state.get_data()
-    phone = user_data.get("phone", "Noma'lum")
+    phone = user_data.get("phone", "Unknown") # Noma'lum o'rniga Unknown
 
-    pay_info = message.successful_payment  # To'lov haqida ma'lumotlar
+    pay_info = message.successful_payment
 
-    # 1. Adminga to'liq chek shakllantiramiz
+    # 1. Adminga to'liq chek shakllantiramiz (Ingliz tilida)
     admin_msg = (
-        f"💰 <b>YANGI ONLINE TO'LOV!</b>\n"
+        f"💰 <b>NEW ONLINE PAYMENT!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Mijoz:</b> {message.from_user.full_name}\n"
+        f"👤 <b>Customer:</b> {message.from_user.full_name}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
-        f"📞 <b>Tel:</b> {phone}\n"
-        f"💵 <b>Summa:</b> {pay_info.total_amount // 100} {pay_info.currency}\n"
-        f"📑 <b>Tranzaksiya ID:</b> \n<code>{pay_info.provider_payment_charge_id}</code>\n"
-        f"📅 <b>Sana:</b> {message.date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📞 <b>Phone:</b> {phone}\n"
+        f"💵 <b>Amount:</b> {pay_info.total_amount // 100} {pay_info.currency}\n"
+        f"📑 <b>Transaction ID:</b> \n<code>{pay_info.provider_payment_charge_id}</code>\n"
+        f"📅 <b>Date:</b> {message.date.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"✅ To'lov muvaffaqiyatli tasdiqlandi."
+        f"✅ Payment successfully verified."
     )
 
     # 2. Adminga yuboramiz
@@ -309,12 +336,22 @@ async def on_successful_payment(message: types.Message, state: FSMContext):
 
     # 3. Mijozga tasdiq xabari
     await message.answer(
-        f"Rahmat! <b>{pay_info.total_amount // 100} so'm</b> miqdoridagi to'lovingiz qabul qilindi. ✅\n"
-        f"Buyurtmangiz tayyorlanmoqda.",
+        f"Thank you! Your payment of <b>{pay_info.total_amount // 100} UZS</b> has been received. ✅\n"
+        f"Your order is being prepared.",
         parse_mode="HTML"
     )
+
+    # --- YASHRIN XATO TUZATILDI: Ombordan ayirish ---
+    # get_cart_items o'rniga get_cart_products ishlatamiz
+    cart_items = get_cart_products(user_id)
+
+    for item in cart_items:
+        # product_id o'rniga to'g'ri kalitni ('id') ishlatamiz
+        product_id = item['id']
+        cart_quantity = item['quantity']
+        reduce_product_quantity(product_id, cart_quantity)
 
     # Savatni tozalash va holatni yakunlash
     clear_cart(user_id)
     await state.clear()
-    await message.answer("Asosiy menyuga qaytdingiz:", reply_markup=get_main_menu())
+    await message.answer("Returned to Main Menu:", reply_markup=get_main_menu())
