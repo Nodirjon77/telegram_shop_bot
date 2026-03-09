@@ -91,7 +91,7 @@ async def process_quantity(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Product successfully added to the inventory!</b>\n\n"
         f"🏷 Name: {data['name']}\n"
-        f"💰 Price: {data['price']} UZS\n"
+        f"💰 Price: {data['price']} USD\n"
         f"📦 In Stock: {quantity} pcs",
         parse_mode="HTML",
         reply_markup=get_admin_keyboard()
